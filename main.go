@@ -27,7 +27,7 @@ func main() {
 	e := echo.New()
 
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Format: "method=${method}, uri=${uri}, latency=${latency}\n",
+		Format: "Request received: method=${method}, uri=${uri}, duration=${latency_human}\n",
 	}))
 	e.Use(middleware.Recover())
 

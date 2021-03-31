@@ -43,6 +43,8 @@ func CreateLogHandler(payloads *[]Log, batchSize int) echo.HandlerFunc {
 		*payloads = append(*payloads, *logEntry)
 
 		if len(*payloads) >= batchSize {
+			// Sync can be called as a goroutine
+			// But doing so can result in payload size increase before sync
 			syncToPostEndpoint(payloads, ctx.Echo())
 		}
 
@@ -99,12 +101,20 @@ func syncToPostEndpoint(payloads *[]Log, e *echo.Echo) {
 		if count == 2 {
 			panic(fmt.Sprintf("Calls to %s failed three times in a row.", postEndpoint))
 		}
+		// Wait 2 seconds before retrying.
+		// This currently blocks the API, considering we don't want new entries
+		// in the in-memory cache because that will exceed batch size.
+		// To unblock, we can call sync as a go routine.
+		time.Sleep(2 * time.Second)
 	}
 	stop := time.Now()
+
+	// Log BatchSize, Response Code and Duration on success
 	e.Logger.Infof("BatchSize: %d, RespStatusCode: %d, Duration: %s",
 		len(*payloads),
 		statusCode,
 		stop.Sub(start),
 	)
+	// Clear the in-memory cache
 	*payloads = make([]Log, 0, len(*payloads))
 }
