@@ -20,13 +20,13 @@ func main() {
 	e.Use(middleware.Recover())
 
 	// Routes
-	e.GET("/", hello)
+	e.GET("/healthz", healthz)
 
 	// Start server
 	e.Logger.Fatal(e.Start(":8080"))
 }
 
 // Handler
-func hello(ctx echo.Context) error {
-	return ctx.String(http.StatusOK, "Hello, World!")
+func healthz(ctx echo.Context) error {
+	return ctx.String(http.StatusOK, "OK")
 }
