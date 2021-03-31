@@ -2,7 +2,7 @@ FROM golang:1.16 AS builder
 WORKDIR /src
 COPY . .
 RUN go mod download
-RUN go build -o /src/app
+RUN go build -o app
 
 FROM golangci/golangci-lint:v1.39.0 AS linter
 

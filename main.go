@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/gommon/log"
 )
 
 type Globals struct {
@@ -17,7 +18,6 @@ type Globals struct {
 var (
 	batchSize     = utils.GetEnvAsInt("BATCH_SIZE")
 	batchInterval = utils.GetEnvAsInt("BATCH_INTERVAL")
-	logFile, _    = os.Open("./server.log")
 	globals       = new(Globals)
 )
 
@@ -28,7 +28,6 @@ func main() {
 
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Format: "method=${method}, uri=${uri}, latency=${latency}\n",
-		Output: logFile,
 	}))
 	e.Use(middleware.Recover())
 
@@ -40,11 +39,14 @@ func main() {
 		},
 	)
 
-	e.POST("/log", syncer.CreateLogHandler(&globals.Payloads))
+	e.POST("/log", syncer.CreateLogHandler(&globals.Payloads, batchSize))
 
 	// Start gorountine
-	go syncer.StartIntervalSyncer(&globals.Payloads, batchInterval)
+	go syncer.StartIntervalSyncer(&globals.Payloads, batchInterval, e)
 
 	// Start server
+	e.Logger.SetOutput(os.Stdout)
+	e.Logger.SetLevel(log.INFO)
+	e.Logger.Info("Server started!")
 	e.Logger.Fatal(e.Start(":8080"))
 }

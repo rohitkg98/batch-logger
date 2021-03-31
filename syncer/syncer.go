@@ -1,8 +1,11 @@
 package syncer
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -26,8 +29,9 @@ type Log struct {
 	Completed bool `json:"completed"`
 }
 
-// Creates a function with provided payloads in scope
-func CreateLogHandler(payloads *[]Log) echo.HandlerFunc {
+// Creates a function with provided payloads and batchSize in scope
+// Another way to do this would be create these as a method on the Globals struct
+func CreateLogHandler(payloads *[]Log, batchSize int) echo.HandlerFunc {
 
 	return func(ctx echo.Context) error {
 		logEntry := new(Log)
@@ -37,18 +41,70 @@ func CreateLogHandler(payloads *[]Log) echo.HandlerFunc {
 		}
 
 		*payloads = append(*payloads, *logEntry)
-		fmt.Printf("%v", payloads)
+
+		if len(*payloads) >= batchSize {
+			syncToPostEndpoint(payloads, ctx.Echo())
+		}
+
 		return ctx.String(http.StatusOK, "OK")
 	}
 }
 
 // Run as goroutine to run alongside server
 // Periodically dumps payloads to provided endpoint, after provided interval
-func StartIntervalSyncer(payloads *[]Log, batchInterval int) {
+func StartIntervalSyncer(payloads *[]Log, batchInterval int, e *echo.Echo) {
 	for {
 		time.Sleep(time.Second * time.Duration(batchInterval))
-		println("Interval Syncer running")
-		fmt.Printf("%v", payloads)
-		println("Interval Syncer Complete")
+		if len(*payloads) > 0 {
+			syncToPostEndpoint(payloads, e)
+		}
 	}
+}
+
+func readPostEndpoint() string {
+	env, exists := os.LookupEnv("POST_ENDPOINT")
+
+	if !exists {
+		panic("Please set Environment Variable: POST_ENDPOINT")
+	}
+	return env
+}
+
+var postEndpoint = readPostEndpoint()
+
+type Payload struct {
+	Payloads []Log `json:"payloads"`
+}
+
+func syncToPostEndpoint(payloads *[]Log, e *echo.Echo) {
+	jsonData, err := json.Marshal(Payload{
+		Payloads: *payloads,
+	})
+
+	if err != nil {
+		panic("Payloads cannot be Marshalled\n")
+	}
+
+	var statusCode int
+	start := time.Now()
+	for count := 0; count < 3; count++ {
+		resp, err := http.Post(postEndpoint, "application/json", bytes.NewBuffer(jsonData))
+
+		if err == nil {
+			statusCode = resp.StatusCode
+			break
+		}
+
+		// Error non-nil and three requests have been made.
+		if count == 2 {
+			panic(fmt.Sprintf("Calls to %s failed three times in a row.", postEndpoint))
+		}
+	}
+	stop := time.Now()
+	e.Logger.Infof("BatchSize: %d, RespStatusCode: %d, Duration: %s",
+		len(*payloads),
+		statusCode,
+		stop.Sub(start),
+	)
+	*payloads = make([]Log, 0, len(*payloads))
 }
