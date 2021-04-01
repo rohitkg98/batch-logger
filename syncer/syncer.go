@@ -29,10 +29,24 @@ type Log struct {
 	Completed bool `json:"completed"`
 }
 
-// Creates a function with provided payloads and batchSize in scope
-// Another way to do this would be create these as a method on the Globals struct
-func CreateLogHandler(payloads *[]Log, batchSize int) echo.HandlerFunc {
+type Syncer struct {
+	batchSize     int
+	batchInterval int
+	payloads      Payloads
+	e             *echo.Echo
+}
 
+func CreateSyncer(batchSize int, batchInterval int, payloads Payloads, e *echo.Echo) Syncer {
+	return Syncer{
+		batchSize,
+		batchInterval,
+		payloads,
+		e,
+	}
+}
+
+// Create a Handler route for receiving Log Entries
+func (s Syncer) CreateLogHandler() echo.HandlerFunc {
 	return func(ctx echo.Context) error {
 		logEntry := new(Log)
 		if err := ctx.Bind(logEntry); err != nil {
@@ -40,25 +54,37 @@ func CreateLogHandler(payloads *[]Log, batchSize int) echo.HandlerFunc {
 			return ctx.String(http.StatusBadRequest, "Invalid Request Body")
 		}
 
-		*payloads = append(*payloads, *logEntry)
-
-		if len(*payloads) >= batchSize {
-			// Sync can be called as a goroutine
-			// But doing so can result in payload size increase before sync
-			syncToPostEndpoint(payloads, ctx.Echo())
-		}
+		s.payloads.Add(*logEntry)
 
 		return ctx.String(http.StatusOK, "OK")
 	}
 }
 
 // Run as goroutine to run alongside server
-// Periodically dumps payloads to provided endpoint, after provided interval
-func StartIntervalSyncer(payloads *[]Log, batchInterval int, e *echo.Echo) {
+// Periodically triggers sync process
+func (s Syncer) SyncAtIntervals() {
 	for {
-		time.Sleep(time.Second * time.Duration(batchInterval))
-		if len(*payloads) > 0 {
-			syncToPostEndpoint(payloads, e)
+		time.Sleep(time.Second * time.Duration(s.batchInterval))
+		s.payloads.Process()
+	}
+}
+
+// Listens to payload stream
+// if Process is triggered, syncs to POST_ENDPOINT
+// also syncs when Batch Size has reached
+func (s Syncer) Listen() {
+	payloads := make([]Log, 0, s.batchSize)
+	for {
+		payload := <-s.payloads.Stream
+
+		if !payload.process {
+			payloads = append(payloads, payload.entry)
+		}
+
+		if (payload.process || len(payloads) >= s.batchSize) && len(payloads) > 0 {
+			// Call Sync as a goroutine so it executes concurrently
+			go syncToPostEndpoint(payloads, s.e)
+			payloads = make([]Log, 0, s.batchSize)
 		}
 	}
 }
@@ -78,9 +104,9 @@ type Payload struct {
 	Payloads []Log `json:"payloads"`
 }
 
-func syncToPostEndpoint(payloads *[]Log, e *echo.Echo) {
+func syncToPostEndpoint(payloads []Log, e *echo.Echo) {
 	jsonData, err := json.Marshal(Payload{
-		Payloads: *payloads,
+		Payloads: payloads,
 	})
 
 	if err != nil {
@@ -102,19 +128,14 @@ func syncToPostEndpoint(payloads *[]Log, e *echo.Echo) {
 			panic(fmt.Sprintf("Calls to %s failed three times in a row.", postEndpoint))
 		}
 		// Wait 2 seconds before retrying.
-		// This currently blocks the API, considering we don't want new entries
-		// in the in-memory cache because that will exceed batch size.
-		// To unblock, we can call sync as a go routine.
 		time.Sleep(2 * time.Second)
 	}
 	stop := time.Now()
 
 	// Log BatchSize, Response Code and Duration on success
 	e.Logger.Infof("BatchSize: %d, RespStatusCode: %d, Duration: %s",
-		len(*payloads),
+		len(payloads),
 		statusCode,
 		stop.Sub(start),
 	)
-	// Clear the in-memory cache
-	*payloads = make([]Log, 0, len(*payloads))
 }

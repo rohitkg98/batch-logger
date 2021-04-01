@@ -9,9 +9,18 @@
 - Do not forget to provide a file of environment variables or environment variables via command line
 
 ### Environment Variables
-- BATCH_SIZE: amount after which sync to POST_ENDPOINT should be triggered
-- BATCH_INTERVAL: time in seconds after which sync to POST_ENDPOINT should be triggered
-- POST_ENDPOINT: http endpoint where POST request should be made to dump log entries
+
+- `BATCH_SIZE`: amount after which sync to POST_ENDPOINT should be triggered
+- `BATCH_INTERVAL`: time in seconds after which sync to POST_ENDPOINT should be triggered
+- `POST_ENDPOINT`: http endpoint where POST request should be made to dump log entries
+
+## Architecture
+
+- Stream processing model using goroutines and channel.
+- all log entries received in requests are queued up in a channel.
+- A listener concurrently retrieves them and syncs if manually triggered or batch size reached.
+- An alternative would be using mutexes to lock shared in-memory cache.
+
 ## Endpoints
 
 - `/log`: post log entries here

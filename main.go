@@ -12,7 +12,7 @@ import (
 )
 
 type Globals struct {
-	Payloads []syncer.Log
+	payloads syncer.Payloads
 }
 
 var (
@@ -22,7 +22,10 @@ var (
 )
 
 func main() {
-	globals.Payloads = make([]syncer.Log, 0, batchSize)
+	globals.payloads = syncer.Payloads{
+		BatchSize: batchSize,
+		Stream:    make(chan syncer.ProcessOrLog),
+	}
 	// Echo instance
 	e := echo.New()
 
@@ -39,10 +42,13 @@ func main() {
 		},
 	)
 
-	e.POST("/log", syncer.CreateLogHandler(&globals.Payloads, batchSize))
+	s := syncer.CreateSyncer(batchSize, batchInterval, globals.payloads, e)
+
+	e.POST("/log", s.CreateLogHandler())
 
 	// Start gorountine
-	go syncer.StartIntervalSyncer(&globals.Payloads, batchInterval, e)
+	go s.SyncAtIntervals()
+	go s.Listen()
 
 	// Start server
 	e.Logger.SetOutput(os.Stdout)
